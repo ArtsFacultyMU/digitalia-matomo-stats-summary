@@ -13,9 +13,38 @@ SITES = {
         "digilib.phil.muni.cz": 13,
         "www.beauty-patterns.org": 14,
         "herbaria.phil.muni.cz": 19,
-        "digital-humanities.phil.muni.cz": 9
+        "archaeodata.phil.muni.cz": 20,
+        "digital-humanities.phil.muni.cz": 9,
+        "digitalia.phil.muni.cz": 8,
         }
+TIMEOUT=120
 # ------------------------------------------
+
+def call_matomo(site_id, year, method, token, segment):
+    bases_params = {
+        "module": "API",
+        "idSite": site_id,
+        "period": "year",
+        "date": f"{year}-01-01",
+        "format": "JSON",
+        "token_auth": token
+    }
+    
+    params_final = bases_params | {"method": method}
+    if segment:
+        params_final["segment"] = segment
+
+    try:
+        r = requests.get(BASE_URL, params=params_final, timeout=TIMEOUT)
+        r.raise_for_status()
+        output = r.json()
+    except requests.exceptions.RequestException as e:
+        sys.exit(f"Request failed for site {site_id}: {e}")
+    except ValueError:
+        sys.exit(f"Failed to parse JSON response for site {site_id}")
+
+    return output
+
 
 def fetch_stats(site_id, year, token, segment=None):
     base_params = {
@@ -28,36 +57,14 @@ def fetch_stats(site_id, year, token, segment=None):
     }
 
    
-    params_visits = base_params | {"method": "VisitsSummary.get"}
-    if segment:
-        params_visits["segment"] = segment
-
-    try:
-        r1 = requests.get(BASE_URL, params=params_visits, timeout=30)
-        r1.raise_for_status()
-        visits = r1.json()
-    except requests.exceptions.RequestException as e:
-        sys.exit(f"Request failed for site {site_id}: {e}")
-    except ValueError:
-        sys.exit(f"Failed to parse JSON response for site {site_id}")
-
-
-    params_actions = base_params | {"method": "Actions.get"}
-    if segment:
-        params_actions["segment"] = segment
-
-    try:
-        r2 = requests.get(BASE_URL, params=params_actions, timeout=30)
-        r2.raise_for_status()
-        actions = r2.json()
-    except requests.exceptions.RequestException as e:
-        sys.exit(f"Request failed for site {site_id}: {e}")
-    except ValueError:
-        sys.exit(f"Failed to parse JSON response for site {site_id}")
+    visits = call_matomo(site_id, year, "VisitsSummary.get", token, segment); 
+    actions = call_matomo(site_id, year, "Actions.get", token, segment); 
 
     return {
         "nb_visits": visits.get("nb_visits", 0),
         "nb_pageviews": actions.get("nb_pageviews", 0),
+        "nb_downloads": actions.get("nb_downloads", 0),
+        "nb_searches": actions.get("nb_searches", 0)
     }
 
 
@@ -76,12 +83,14 @@ def main():
     writer.writerow([f"Statistics {year}"])
     writer.writerow(["Platform", 
        "Pageviews overall", "Pageviews MUNI", "Pageviews CZ", "Pageviews CZ not MUNI", "Pageviews abroad", 
-       "Visits overall", "Visits MUNI", "Visits CZ", "Visits CZ not MUNI", "Visits abroad"])
+       "Visits overall", "Visits MUNI", "Visits CZ", "Visits CZ not MUNI", "Visits abroad", "Searches", "Downloads"])
 
     for site_name, site_id in SITES.items():
         totals = fetch_stats(site_id, year, token)
         visits_all = totals['nb_visits']
         pageviews_all = totals['nb_pageviews']
+        searches_all = totals['nb_searches']
+        downloads_all = totals['nb_downloads']
 
         czonly = fetch_stats(site_id, year, token, "countryCode==CZ");
         visits_czonly = czonly['nb_visits']
@@ -102,8 +111,19 @@ def main():
         pageviews_abroad = pageviews_all - pageviews_czonly;
 
 
-        writer.writerow([site_name, pageviews_all, pageviews_muni, pageviews_czonly, pageviews_cznotmuni, pageviews_abroad,
-                         visits_all, visits_muni, visits_czonly, visits_cznotmuni, visits_abroad])
+        writer.writerow([site_name, 
+                         pageviews_all, 
+                         pageviews_muni, 
+                         pageviews_czonly, 
+                         pageviews_cznotmuni, 
+                         pageviews_abroad,
+                         visits_all, 
+                         visits_muni, 
+                         visits_czonly, 
+                         visits_cznotmuni, 
+                         visits_abroad,
+                         searches_all,
+                         downloads_all])
 
 
 if __name__ == "__main__":
